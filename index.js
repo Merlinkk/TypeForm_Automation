@@ -1,92 +1,157 @@
 const puppeteer = require('puppeteer');
 const config = require('./config.json');
 
+// Utility functions
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function fillInput(page, selector, value) {
-  await page.waitForSelector(selector);
-  await page.type(selector, value);
-  await page.keyboard.press('Enter');
-}
+class TypeformAutomation {
+  constructor(config) {
+    this.config = config;
+    this.browser = null;
+    this.page = null;
+  }
 
-async function selectDropdownOption(page, selector, value) {
-  await page.waitForSelector(selector);
-  await page.click(selector);
-  await page.type(selector, value);
-  await page.waitForSelector(`div[data-qa="dropdown-option"][data-value="${value}"]`);
-  await page.click(`div[data-qa="dropdown-option"][data-value="${value}"]`);
-  await page.keyboard.press('Enter');
-}
-
-async function handleAcceptancePage(page) {
-  try {
-    await page.evaluate(() => {
-      const buttons = Array.from(document.querySelectorAll('button, label, div'));
-      const acceptButton = buttons.find(button => button.textContent.toLowerCase().includes('i accept'));
-      if (acceptButton) {
-        acceptButton.click();
-      }
+  async initialize() {
+    this.browser = await puppeteer.launch({
+      headless: false,
+      defaultViewport: null,
+      args: ['--start-maximized'],
+      slowMo: 100,
+      executablePath: '/usr/bin/google-chrome-stable'
     });
-    await delay(500);
-    await page.keyboard.press('Tab');
-    await page.keyboard.press('Space');
-    await delay(500);
-    await page.keyboard.press('Enter');
-  } catch (error) {
-    console.log('Using fallback method for acceptance page');
-    await delay(500);
-    await page.keyboard.press('Enter');
-    await delay(500);
-    await page.keyboard.press('Enter');
+    this.page = await this.browser.newPage();
   }
-}
 
-async function automateForm() {
-  const browser = await puppeteer.launch({
-    headless: false,
-    defaultViewport: null,
-    args: ['--start-maximized'],
-    slowMo: 50
-  });
+  async fillInput(selector, value) {
+    try {
+      await this.page.waitForSelector(selector, { timeout: 5000 });
+      await this.page.type(selector, value);
+      await this.page.keyboard.press('Enter');
+    } catch (error) {
+      throw new Error(`Failed to fill input ${selector}: ${error.message}`);
+    }
+  }
 
-  try {
-    const page = await browser.newPage();
-    await page.goto('https://qmu8hxor50w.typeform.com/to/YMONJ8dd', { waitUntil: 'networkidle0' });
+  async selectDropdownOption(selector, value) {
+    try {
+      await this.page.waitForSelector(selector);
+      // await this.page.click(selector);
+      await this.page.type(selector, value);
+      
+      await delay(500);
+      await this.page.keyboard.press('ArrowDown');
+      await delay(100);
+      await this.page.keyboard.press('Enter');
+      await delay(1000);
+    } catch (error) {
+      throw new Error(`Failed to select dropdown option ${value}: ${error.message}`);
+    }
+  }
 
-    await page.waitForSelector('button[data-qa="start-button"]');
-    await page.click('button[data-qa="start-button"]');
+  async handleAcceptancePage(key) {
+    try {
+      await this.page.keyboard.press(key);
+    } catch (error) {
+      console.log('Using fallback method for acceptance page');
+      await delay(500);
+      await this.page.keyboard.press('Enter');
+      await delay(500);
+      await this.page.keyboard.press('Enter');
+    }
+  }
 
-    await fillInput(page, 'input[type="email"]', config.email);
-
+  getTodayDate() {
     const today = new Date();
-    const day = String(today.getDate()).padStart(2, '0');
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const year = "2024";
-    
-    await fillInput(page, 'input[placeholder="DD"]', day);
-    await fillInput(page, 'input[placeholder="MM"]', month);
-    await fillInput(page, 'input[placeholder="YYYY"]', year);
+    return {
+      day: String(today.getDate()).padStart(2, '0'),
+      month: String(today.getMonth() + 1).padStart(2, '0'),
+      year: "2024"
+    };
+  }
 
-    await delay(1000);
-    await handleAcceptancePage(page);
+  async automateForm() {
+    try {
+      await this.initialize();
+      
+      // Navigate to form
+      await this.page.goto('https://qmu8hxor50w.typeform.com/to/YMONJ8dd', { 
+        waitUntil: 'networkidle0',
+        timeout: 30000 
+      });
 
-    await delay(1000);
-    await selectDropdownOption(page, 'input[data-qa="dropdown-input"]', config.company);
-    await selectDropdownOption(page, 'input[data-qa="dropdown-input"]', config.workType);
+      // Start form
+      await this.page.waitForSelector('button[data-qa="start-button"]');
+      await this.page.click('button[data-qa="start-button"]');
 
-    await fillInput(page, 'textarea', config.tasks);
-    await fillInput(page, 'label[data-qa="rating-5"]', '');
-    await fillInput(page, 'label[data-qa="rating-4"]', '');
-    await fillInput(page, 'textarea', config.wins);
+      // Fill email
+      await this.fillInput('input[type="email"]', this.config.email);
 
-    await selectDropdownOption(page, 'input[data-qa="dropdown-input"]', config.contactType);
+      // Fill date
+      const { day, month, year } = this.getTodayDate();
+      await this.fillInput('input[placeholder="DD"]', day);
+      await this.fillInput('input[placeholder="MM"]', month);
+      await this.fillInput('input[placeholder="YYYY"]', year);
 
-    console.log('Form submitted successfully!');
-  } catch (error) {
-    console.error('Error occurred:', error);
-  } finally {
-    await browser.close();
+      // Handle acceptance page
+      await delay(1000);
+      await this.handleAcceptancePage('a');
+
+      // Select company
+      await delay(1000);
+      await this.selectDropdownOption(
+        'input[placeholder="Type or select an option"]', 
+        this.config.company
+      );
+      await delay(1000);
+
+      await this.selectDropdownOption(
+        'input[id="dropdown-2aac409a-70d3-435d-bd19-80d437a90c37-8YtvfYLHPHZey5Pl"]', 
+        this.config.workType
+      );
+      await delay(1000);
+
+      await this.selectDropdownOption(
+        'input[placeholder="Type your answer here..."]', 
+        this.config.tasks
+      );
+      await delay(1000);
+
+      await this.page.waitForSelector('div[class="RatingItems-sc-__sc-qvp7k7-2 kHHjAL"]')
+      await this.page.keyboard.press(JSON.stringify(this.config.rating1));
+      await delay(1000);
+
+      await this.page.waitForSelector('div[class="RatingItems-sc-__sc-qvp7k7-2 kHHjAL"]')
+      await this.page.keyboard.press(JSON.stringify(this.config.rating2));
+      await delay(1000);
+
+      await this.selectDropdownOption(
+        'input[placeholder="Type your answer here..."]', 
+        this.config.wins
+      );
+      await delay(1000);
+
+      await this.selectDropdownOption(
+        'input[placeholder="Type or select an option"]', 
+        this.config.contactType
+      );
+
+
+      console.log('Form submitted successfully!');
+    } catch (error) {
+      console.error('Automation failed:', error.message);
+      throw error;
+    } finally {
+      if (this.browser) {
+        // Uncomment to close browser after completion
+        // await this.browser.close();
+      }
+    }
   }
 }
 
-automateForm();
+// Run automation
+const automation = new TypeformAutomation(config);
+automation.automateForm().catch(error => {
+  console.error('Fatal error:', error);
+  process.exit(1);
+});
